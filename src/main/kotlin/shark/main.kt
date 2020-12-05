@@ -2,6 +2,7 @@ package shark
 
 import androidx.compose.desktop.AppManager
 import androidx.compose.desktop.Window
+import androidx.compose.desktop.WindowEvents
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -67,7 +68,15 @@ fun getWindowIcon(): BufferedImage {
 
 fun showHeapGraphWindow(heapDumpFile: File) {
   val loadingState = HeapDumpLoadingState(heapDumpFile, Executors.newSingleThreadExecutor())
-  Window(title = "${heapDumpFile.name} - SharkApp") {
+  Window(
+    title = "${heapDumpFile.name} - SharkApp",
+    events = WindowEvents(onClose = {
+      loadingState.loadedGraph.value?.close()
+      loadingState.ioExecutor.shutdown()
+      println("Closed ${heapDumpFile.path}")
+    })
+
+  ) {
     onActive {
       val tray = Tray().apply {
         icon(getWindowIcon())
@@ -80,9 +89,6 @@ fun showHeapGraphWindow(heapDumpFile: File) {
       }
       onDispose {
         tray.remove()
-        loadingState.loadedGraph.value?.close()
-        loadingState.ioExecutor.shutdown()
-        println("Closed ${heapDumpFile.path}")
       }
     }
 
