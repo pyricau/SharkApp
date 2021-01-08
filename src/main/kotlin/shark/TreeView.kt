@@ -52,6 +52,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import shark.ItemClickEvent.ROW_CLICK
 import shark.ItemClickEvent.TOGGLE_EXPAND
+import kotlin.math.max
+import kotlin.math.min
 import java.time.Duration
 import java.time.Instant
 import java.util.LinkedList
@@ -95,12 +97,19 @@ fun <T> TreeView(
 
   var lastRowClick by remember { mutableStateOf<Pair<Int, Instant>?>(null) }
 
-  TreeView(tree) { index, itemClickEvent ->
-    val node = tree[index]
+  // selected order, ordered from first selected to last selected (in historical order)
+  var selectedNodes: List<TreeNode<T>> by remember(rootItems) {
+    mutableStateOf(emptyList())
+  }
+
+  var selectionViaMeta by remember { mutableStateOf(false) }
+
+  TreeView(tree) { clickedItemIndex, itemClickEvent ->
+    val node = tree[clickedItemIndex]
     when (itemClickEvent) {
       TOGGLE_EXPAND -> {
         lastRowClick = null
-        tree = toggleExpandNode(tree, index, expandItem)
+        tree = toggleExpandNode(tree, clickedItemIndex, expandItem)
         scope.launch {
           delay(100)
           tree = tree.map {
@@ -110,15 +119,48 @@ fun <T> TreeView(
       }
       ROW_CLICK -> {
         val clickInstant = Instant.now()
-
         if (pressedKeys.meta) {
           if (node.item.selectable) {
             tree = tree.toggleSelected(node)
+            if (node.selected) {
+              selectedNodes = selectedNodes.filter { it.id != node.id }
+            } else {
+              selectedNodes += node
+            }
+            selectionViaMeta = true
           }
         } else if (pressedKeys.shift) {
-          //  TODO  Select all from last place selected (=> need to keep a list of selection  in order)
+          if (selectedNodes.isEmpty()) {
+            tree = tree.mapIndexed { index, treeNode ->
+              if (index <= clickedItemIndex && treeNode.item.selectable) treeNode.copy(selected = true) else treeNode
+            }
+            selectedNodes = tree.take(clickedItemIndex + 1).filter { it.item.selectable }
+            // } else if (selectionViaMeta) {
+
+            // TODO This isn't fully implemented.
+            // There should be a way to alternate cmd and shift selections to select
+            // several blocks in a list. Need to figure out rules.
+          } else {
+            val startOfRange = selectedNodes.first()
+            val startOfRangeIndex = tree.indexOfFirst { it.id == startOfRange.id }
+            val rangeMin = min(startOfRangeIndex, clickedItemIndex)
+            val rangeMax = max(startOfRangeIndex, clickedItemIndex)
+            tree = tree.mapIndexed { index, treeNode ->
+              val selected = index in rangeMin..rangeMax && treeNode.item.selectable
+              if (treeNode.selected != selected) {
+                treeNode.copy(selected = selected)
+              } else {
+                treeNode
+              }
+            }
+            selectedNodes = tree.filter { it.selected }
+            if (clickedItemIndex < startOfRangeIndex) {
+              selectedNodes = selectedNodes.reversed()
+            }
+          }
+          selectionViaMeta = false
         } else {
-          if (lastRowClick != null && lastRowClick!!.first == index &&
+          if (lastRowClick != null && lastRowClick!!.first == clickedItemIndex &&
             Duration.between(
               lastRowClick!!.second,
               clickInstant
@@ -130,22 +172,28 @@ fun <T> TreeView(
             // For that reason, we must delay handling the single click by the double click timeout
             delayedClick?.cancel()
 
-            onDoubleClick(tree.filter { it.selected }.map {
-              it.item
-            })
+            if (node.item.selectable) {
+              onDoubleClick(tree.filter { it.selected }.map {
+                it.item
+              })
+            }
           } else {
             if (node.item.selectable) {
               if (node.selected) {
                 delayedClick = scope.launch {
                   delay(DoubleTapTimeout.inMilliseconds())
                   tree = tree.selectOnly(node)
+                  selectedNodes = listOf(node)
+                  selectionViaMeta = false
                 }
               } else {
                 tree = tree.selectOnly(node)
+                selectedNodes = listOf(node)
+                selectionViaMeta = false
               }
             }
             if (node.item.expandable) {
-              tree = toggleExpandNode(tree, index, expandItem)
+              tree = toggleExpandNode(tree, clickedItemIndex, expandItem)
               scope.launch {
                 delay(100)
                 tree = tree.map {
@@ -157,7 +205,7 @@ fun <T> TreeView(
         }
 
         // TODO Ctrl + Click = right click
-        lastRowClick = index to clickInstant
+        lastRowClick = clickedItemIndex to clickInstant
       }
     }
   }
@@ -290,7 +338,7 @@ private fun <T> TreeItemView(
   onItemClickEvent: (ItemClickEvent) -> Unit
 ) {
   val defaultColor = MaterialTheme.colors.surface
-  val grey =  Color(red = 240, green = 240, blue = 240)
+  val grey = Color(red = 240, green = 240, blue = 240)
 
   Surface(color = if (node.selected) MaterialTheme.colors.secondary else if (index % 2 == 0) defaultColor else grey) {
     Row(

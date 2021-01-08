@@ -21,7 +21,7 @@ dependencies {
     testImplementation("org.junit.jupiter:junit-jupiter-api:5.6.0")
     testRuntimeOnly("org.junit.jupiter:junit-jupiter-engine:5.6.0")
     implementation(compose.desktop.currentOs)
-    implementation("com.squareup.leakcanary:shark:2.5")
+    implementation("com.squareup.leakcanary:shark-android:2.6")
     implementation("com.squareup.okio:okio:2.9.0")
     implementation("com.apurebase:kgraphql:0.16.0")
 }

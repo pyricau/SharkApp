@@ -1,5 +1,6 @@
 package shark
 
+import shark.HeapItem.BoringItems
 import shark.HeapItem.HeapClassItem
 import shark.HeapItem.HeapInstanceItem
 import shark.HeapItem.NotExpandable
@@ -7,6 +8,10 @@ import shark.HeapObject.HeapClass
 import shark.HeapObject.HeapInstance
 import shark.HeapObject.HeapObjectArray
 import shark.HeapObject.HeapPrimitiveArray
+import shark.LeakTraceObject.LeakingStatus
+import shark.LeakTraceObject.LeakingStatus.LEAKING
+import shark.LeakTraceObject.LeakingStatus.NOT_LEAKING
+import shark.LeakTraceObject.LeakingStatus.UNKNOWN
 import shark.ValueHolder.BooleanHolder
 import shark.ValueHolder.ByteHolder
 import shark.ValueHolder.CharHolder
@@ -16,26 +21,24 @@ import shark.ValueHolder.IntHolder
 import shark.ValueHolder.LongHolder
 import shark.ValueHolder.ReferenceHolder
 import shark.ValueHolder.ShortHolder
+import kotlin.math.ln
+import kotlin.math.pow
 
 sealed class HeapItem {
 
   open fun expand(
-    graph: HeapGraph,
-    classesWithInstanceCounts: Map<Long, Int>
+    graph: LoadedGraph
   ): List<TreeItem<HeapItem>> = emptyList()
 
-  class HeapClassItem(val objectId: Long) : HeapItem() {
-    override fun expand(
-      graph: HeapGraph,
-      classesWithInstanceCounts: Map<Long, Int>
-    ): List<TreeItem<HeapItem>> {
+  class HeapClassItem(private val objectId: Long) : HeapItem() {
+    override fun expand(graph: LoadedGraph): List<TreeItem<HeapItem>> {
       val heapClass = graph.findObjectById(objectId) as HeapClass
       val superclass = heapClass.superclass
       val items = mutableListOf<TreeItem<HeapItem>>()
 
       if (superclass != null) {
         items += superclass.toTreeItem(
-          classesWithInstanceCounts.getValue(superclass.objectId),
+          graph.instanceCount(superclass),
           prefix = "Parent "
         )
       }
@@ -46,6 +49,16 @@ sealed class HeapItem {
         boringItem("No subclass")
       }
 
+      graph.dominating(objectId)?.let { dominating ->
+        val retainedSize = humanReadableByteCount(dominating.retainedSize.toLong())
+        val shallowSize = humanReadableByteCount(dominating.shallowSize.toLong())
+        items += boringItem("Shallow size: $shallowSize")
+        items += boringItem("Retaining $retainedSize in ${dominating.retainedCount} objects")
+        if (dominating.dominatedObjectIds.isNotEmpty()) {
+          items += sectionHeader("Dominating", HeapDominatingItem(objectId))
+        }
+      }
+
       val staticFieldCount = heapClass.readStaticFields().count()
 
       items += if (staticFieldCount > 0) {
@@ -54,7 +67,7 @@ sealed class HeapItem {
         boringItem("No static field")
       }
 
-      val instanceCount = classesWithInstanceCounts.getValue(objectId)
+      val instanceCount = graph.instanceCount(heapClass)
 
       items += if (instanceCount > 0) {
         sectionHeader("Instances ($instanceCount instances)", HeapClassInstancesItem(objectId))
@@ -66,35 +79,26 @@ sealed class HeapItem {
     }
   }
 
-  class HeapSubclassesItem(val objectId: Long) : HeapItem() {
-    override fun expand(
-      graph: HeapGraph,
-      classesWithInstanceCounts: Map<Long, Int>
-    ): List<TreeItem<HeapItem>> {
-      val heapObject = graph.findObjectById(objectId) as HeapClass
-      return heapObject.subclasses.map { it.toTreeItem(classesWithInstanceCounts.getValue(it.objectId)) }
+  class HeapSubclassesItem(private val objectId: Long) : HeapItem() {
+    override fun expand(graph: LoadedGraph): List<TreeItem<HeapItem>> {
+      val (heapClass, count) = graph.findClassById(objectId)
+      return heapClass.subclasses.map { it.toTreeItem(count) }
         .toList()
     }
   }
 
-  class HeapStaticFieldsItem(val objectId: Long) : HeapItem() {
-    override fun expand(
-      graph: HeapGraph,
-      classesWithInstanceCounts: Map<Long, Int>
-    ): List<TreeItem<HeapItem>> {
-      val heapClass = graph.findObjectById(objectId) as HeapClass
+  class HeapStaticFieldsItem(private val objectId: Long) : HeapItem() {
+    override fun expand(graph: LoadedGraph): List<TreeItem<HeapItem>> {
+      val (heapClass, _) = graph.findClassById(objectId)
 
       return heapClass.readStaticFields().map { field ->
-        field.toTreeItem(classesWithInstanceCounts, "static ")
+        field.toTreeItem(graph, "static ")
       }.toList()
     }
   }
 
-  class HeapClassInstancesItem(val objectId: Long) : HeapItem() {
-    override fun expand(
-      graph: HeapGraph,
-      classesWithInstanceCounts: Map<Long, Int>
-    ): List<TreeItem<HeapItem>> {
+  class HeapClassInstancesItem(private val objectId: Long) : HeapItem() {
+    override fun expand(graph: LoadedGraph): List<TreeItem<HeapItem>> {
       val heapObject = graph.findObjectById(objectId) as HeapClass
       return heapObject.directInstances.map { instance ->
         instance.toTreeItem()
@@ -102,56 +106,101 @@ sealed class HeapItem {
     }
   }
 
-  class HeapInstanceItem(val objectId: Long) : HeapItem() {
-    override fun expand(
-      graph: HeapGraph,
-      classesWithInstanceCounts: Map<Long, Int>
-    ): List<TreeItem<HeapItem>> {
+  class HeapInstanceItem(private val objectId: Long) : HeapItem() {
+    override fun expand(graph: LoadedGraph): List<TreeItem<HeapItem>> {
       val heapInstance = graph.findObjectById(objectId) as HeapInstance
 
       val items = mutableListOf<TreeItem<HeapItem>>()
 
       val instanceClass = heapInstance.instanceClass
-      items += instanceClass.toTreeItem(classesWithInstanceCounts.getValue(instanceClass.objectId))
+      items += instanceClass.toTreeItem(graph.instanceCount(instanceClass))
 
-      val fieldCount = heapInstance.readFields().count()
+      val reporter = ObjectReporter(heapInstance)
+      graph.objectInspectors.forEach {
+        it.inspect(reporter)
+      }
 
-      // TODO Move fields to each be part of its class in subsections.
-      // Class Foo fields
-      // Should be root sections
-      items += if (fieldCount > 0) {
-        sectionHeader("Fields ($fieldCount fields)", HeapMemberFieldsItem(objectId))
-      } else {
-        boringItem("No field")
+      val (status, reason) = reporter.resolveStatus()
+
+      if (status != UNKNOWN) {
+        when (status) {
+          UNKNOWN -> Unit
+          NOT_LEAKING -> items += boringItem("Leaking: NO ($reason)")
+          LEAKING -> items += boringItem("Leaking: YES ($reason)")
+        }
+      }
+
+      if (reporter.labels.isNotEmpty()) {
+        items += boringSection("Inspections", reporter.labels.toList())
+      }
+
+      graph.dominating(objectId)?.let { dominating ->
+        val retainedSize = humanReadableByteCount(dominating.retainedSize.toLong())
+        val shallowSize = humanReadableByteCount(dominating.shallowSize.toLong())
+        items += boringItem("Shallow size: $shallowSize")
+        items += boringItem("Retaining $retainedSize in ${dominating.retainedCount} objects")
+        if (dominating.dominatedObjectIds.isNotEmpty()) {
+          items += sectionHeader("Dominating", HeapDominatingItem(objectId))
+        }
+      }
+
+      var currentClass = heapInstance.instanceClass
+      var currentClassFieldCount = 0
+      heapInstance.readFields().forEach { field ->
+        if (field.declaringClass.objectId == currentClass.objectId) {
+          currentClassFieldCount++
+        } else {
+          items += sectionHeader(
+            "Fields from ${currentClass.name} ($currentClassFieldCount fields)",
+            HeapMemberFieldsItem(currentClass.objectId, objectId)
+          )
+          currentClass = field.declaringClass
+          currentClassFieldCount = 1
+        }
+      }
+      if (currentClassFieldCount > 0) {
+        items += sectionHeader(
+          "Fields from ${currentClass.name} ($currentClassFieldCount fields)",
+          HeapMemberFieldsItem(currentClass.objectId, objectId)
+        )
+      } else if (currentClass === heapInstance.instanceClass) {
+        items += boringItem("No field")
       }
 
       return items
     }
   }
 
-  class HeapMemberFieldsItem(val objectId: Long) : HeapItem() {
-    override fun expand(
-      graph: HeapGraph,
-      classesWithInstanceCounts: Map<Long, Int>
-    ): List<TreeItem<HeapItem>> {
-      val heapInstance = graph.findObjectById(objectId) as HeapInstance
-      return heapInstance.readFields().map { field ->
-        field.toTreeItem(classesWithInstanceCounts)
-      }.toList()
+  class HeapDominatingItem(private val objectId: Long) : HeapItem() {
+    override fun expand(graph: LoadedGraph): List<TreeItem<HeapItem>> {
+      val dominating = graph.dominating(objectId)
+      return dominating?.let {
+        it.dominatedObjectIds.map { dominatedObjectId ->
+          val dominatedObject = graph.findObjectById(dominatedObjectId)
+          dominatedObject.toTreeItem(graph)
+        }
+      } ?: emptyList()
     }
   }
 
-  object NotExpandable : HeapItem() {}
-}
+  class HeapMemberFieldsItem(private val classObjectId: Long, private val objectId: Long) :
+    HeapItem() {
+    override fun expand(graph: LoadedGraph): List<TreeItem<HeapItem>> {
+      val heapInstance = graph.findObjectById(objectId) as HeapInstance
+      return heapInstance.readFields()
+        .filter { field -> field.declaringClass.objectId == classObjectId }.map { field ->
+          field.toTreeItem(graph)
+        }.toList()
+    }
+  }
 
-fun HeapInstance.toTreeItem(prefix: String = ""): TreeItem<HeapItem> {
-  return TreeItem(
-    HeapInstanceItem(objectId),
-    expandable = true,
-    expended = false,
-    name = "${prefix}Instance ${instanceClassName}@${objectId}",
-    selectable = true
-  )
+  object NotExpandable : HeapItem()
+
+  class BoringItems(private val names: List<String>) : HeapItem() {
+    override fun expand(graph: LoadedGraph): List<TreeItem<HeapItem>> {
+      return names.map { boringItem(it) }
+    }
+  }
 }
 
 fun boringItem(name: String): TreeItem<HeapItem> {
@@ -174,6 +223,24 @@ fun sectionHeader(name: String, item: HeapItem): TreeItem<HeapItem> {
   )
 }
 
+fun boringSection(name: String, boringItems: List<String>): TreeItem<HeapItem> {
+  return TreeItem(
+    BoringItems(boringItems),
+    expandable = true,
+    expended = false,
+    name = name,
+    selectable = false
+  )
+}
+
+fun HeapObject.toTreeItem(graph: LoadedGraph): TreeItem<HeapItem> {
+  return when (this) {
+    is HeapClass -> toTreeItem(graph.instanceCount(objectId))
+    is HeapInstance -> toTreeItem()
+    else -> boringItem("$this not supported yet")
+  }
+}
+
 fun HeapClass.toTreeItem(
   instanceCount: Int,
   prefix: String = ""
@@ -187,7 +254,17 @@ fun HeapClass.toTreeItem(
   )
 }
 
-fun HeapField.toTreeItem(classesWithInstanceCounts: Map<Long, Int>, prefix: String = ""): TreeItem<HeapItem> {
+fun HeapInstance.toTreeItem(prefix: String = ""): TreeItem<HeapItem> {
+  return TreeItem(
+    HeapInstanceItem(objectId),
+    expandable = true,
+    expended = false,
+    name = "${prefix}Instance ${instanceClassName}@${objectId}",
+    selectable = true
+  )
+}
+
+fun HeapField.toTreeItem(graph: LoadedGraph, prefix: String = ""): TreeItem<HeapItem> {
   return when (val holder = value.holder) {
     is BooleanHolder -> boringItem("${prefix}boolean $name = ${holder.value}")
     is CharHolder -> boringItem("${prefix}char $name = ${holder.value}")
@@ -201,9 +278,9 @@ fun HeapField.toTreeItem(classesWithInstanceCounts: Map<Long, Int>, prefix: Stri
       if (value.isNullReference) {
         boringItem("${prefix}$name = null")
       } else {
-        when (val referencedObject = declaringClass.graph.findObjectById(holder.value)) {
+        when (val referencedObject = graph.findObjectById(holder.value)) {
           is HeapClass -> referencedObject.toTreeItem(
-            classesWithInstanceCounts.getValue(referencedObject.objectId),
+            graph.instanceCount(referencedObject),
             "${prefix}$name = "
           )
           is HeapInstance -> referencedObject.toTreeItem("${prefix}$name = ")
@@ -215,3 +292,39 @@ fun HeapField.toTreeItem(classesWithInstanceCounts: Map<Long, Int>, prefix: Stri
   }
 }
 
+private fun ObjectReporter.resolveStatus(
+  leakingWins: Boolean = false
+): Pair<LeakingStatus, String> {
+  var status = UNKNOWN
+  var reason = ""
+  if (notLeakingReasons.isNotEmpty()) {
+    status = NOT_LEAKING
+    reason = notLeakingReasons.joinToString(" and ")
+  }
+  val leakingReasons = leakingReasons
+  if (leakingReasons.isNotEmpty()) {
+    val winReasons = leakingReasons.joinToString(" and ")
+    // Conflict
+    if (status == NOT_LEAKING) {
+      if (leakingWins) {
+        status = LEAKING
+        reason = "$winReasons. Conflicts with $reason"
+      } else {
+        reason += ". Conflicts with $winReasons"
+      }
+    } else {
+      status = LEAKING
+      reason = winReasons
+    }
+  }
+  return status to reason
+}
+
+// https://stackoverflow.com/a/3758880
+private fun humanReadableByteCount(bytes: Long): String {
+  val unit = 1000
+  if (bytes < unit) return "$bytes B"
+  val exp = (ln(bytes.toDouble()) / ln(unit.toDouble())).toInt()
+  val pre = "kMGTPE"[exp - 1]
+  return String.format("%.1f %sB", bytes / unit.toDouble().pow(exp.toDouble()), pre)
+}

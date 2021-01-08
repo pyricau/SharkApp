@@ -35,12 +35,11 @@ private fun showStartWindow(image: BufferedImage) {
     val fileDialog = FileDialog(null as Frame?, "Select hprof file")
     fileDialog.isVisible = true
 
-    // rememberCoroutineScope {
-    //
-    // }
-    val heapDumpFile = File(fileDialog.directory, fileDialog.file)
-    showHeapGraphWindow(heapDumpFile) {
-      closeStartWindow()
+    if (fileDialog.file != null && fileDialog.file.endsWith(".hprof")) {
+      val heapDumpFile = File(fileDialog.directory, fileDialog.file)
+      showHeapGraphWindow(heapDumpFile) {
+        closeStartWindow()
+      }
     }
   }
 
