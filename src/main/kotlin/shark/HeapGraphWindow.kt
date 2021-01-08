@@ -25,7 +25,8 @@ import shark.Showing.ShowTree
 import shark.Showing.Start
 
 sealed class Showing {
-  object Start : Showing() {
+
+  class Start : Showing() {
     override fun toString(): String {
       return "Home"
     }
@@ -51,35 +52,30 @@ fun HeapGraphWindow(loadingState: HeapDumpLoadingState, pressedKeys: PressedKeys
           classesWithInstanceCounts[instance.instanceClassId]!! + 1
       }
 
-      var recents by remember { mutableStateOf(listOf<Showing>(Start)) }
-      var backstack by remember { mutableStateOf(listOf<Showing>()) }
-      var frontstack by remember { mutableStateOf(listOf<Showing>()) }
-      var moveForward by remember { mutableStateOf(true) }
+      // TODO Backstack doesn't want to have duplicate entries (ie that are equal) but recents
+      // allow that to happen. Need to see what's what.
 
-      recents.take(2).forEachIndexed { index, showing ->
-        key(showing) {
-          ScreenTransition(visible = index == 0, moveForward) {
-            HeapGraphScreen(
-              graph,
-              classesWithInstanceCounts,
-              pressedKeys,
-              showing,
-              backstack.isNotEmpty(),
-              recents = recents,
-              goBack = {
-                val showing = backstack.first()
-                backstack = backstack.drop(1)
-                recents = listOf(showing) + (recents - showing)
-                moveForward = false
-              },
-              goTo = { destination ->
-                backstack = listOf(recents.first()) + backstack
-                recents = listOf(destination) + (recents - destination)
-                moveForward = true
-              }
-            )
+      var recents by remember { mutableStateOf(listOf<Showing>(Start())) }
+      var backstack by remember { mutableStateOf(listOf<Showing>(Start())) }
+
+      Backstack(backstack) { screen ->
+        HeapGraphScreen(
+          graph,
+          classesWithInstanceCounts,
+          pressedKeys,
+          screen,
+          canGoBack = backstack.size > 1,
+          recents = recents,
+          goBack = {
+            val showing = backstack.last()
+            backstack = backstack.dropLast(1)
+            recents = listOf(showing) + (recents - showing)
+          },
+          goTo = { destination ->
+            backstack += destination
+            recents = listOf(destination) + (recents - destination)
           }
-        }
+        )
       }
     }
   }
@@ -97,7 +93,7 @@ fun HeapGraphScreen(
   goTo: (Showing) -> Unit
 ) {
   when (showing) {
-    Start -> {
+    is Start -> {
       Column {
         if (canGoBack) {
           WrapTextBox("Back") {
@@ -130,7 +126,7 @@ fun HeapGraphScreen(
       Column {
         Row {
           WrapTextBox("Home") {
-            goTo(Start)
+            goTo(Start())
           }
           if (canGoBack) {
             WrapTextBox("Back") {
