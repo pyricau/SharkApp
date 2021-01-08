@@ -134,6 +134,8 @@ sealed class HeapItem {
         items += boringSection("Inspections", reporter.labels.toList())
       }
 
+      items += sectionHeader("Shortest path from GC Roots", HeapShortestPathItem(objectId))
+
       val dominatorId = graph.dominator(objectId)
       if (dominatorId != ValueHolder.NULL_REFERENCE) {
         items += graph.findObjectById(dominatorId).toTreeItem(graph, "Dominator: ")
@@ -187,6 +189,17 @@ sealed class HeapItem {
           dominatedObject.toTreeItem(graph)
         }
       } ?: emptyList()
+    }
+  }
+
+  class HeapShortestPathItem(private val objectId: Long) : HeapItem() {
+    override fun expand(graph: LoadedGraph): List<TreeItem<HeapItem>> {
+      val path = graph.shortestPathFromGcRoots(objectId)
+      return if (path.isEmpty()) {
+        listOf(boringItem("Not reachable via strong refs"))
+      } else {
+        path.map { graph.findObjectById(it).toTreeItem(graph) }
+      }
     }
   }
 

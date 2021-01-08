@@ -11,6 +11,7 @@ import shark.internal.ShallowSizeCalculator
 import shark.internal.hppc.LongLongScatterMap
 import shark.internal.hppc.LongLongScatterMap.ForEachCallback
 import java.io.File
+import shark.internal.ReferencePathNode.ChildNode
 
 class LoadedGraph private constructor(
   private val graph: CloseableHeapGraph,
@@ -48,6 +49,26 @@ class LoadedGraph private constructor(
         dominatedObjectIds = it.dominatedObjectIds
       )
     }
+  }
+
+  fun shortestPathFromGcRoots(objectId: Long): List<Long> {
+    val pathFinder = PathFinder(
+      graph,
+      OnAnalysisProgressListener.NO_OP, AndroidReferenceMatchers.appDefaults
+    )
+    val result = pathFinder.findPathsFromGcRoots(setOf(objectId), false).pathsToLeakingObjects
+    if (result.isEmpty()) {
+      return emptyList()
+    }
+    val leaf = result.first()
+    val path = mutableListOf<Long>()
+    var leakNode = leaf
+    while (leakNode is ChildNode) {
+      path.add(0, leakNode.objectId)
+      leakNode = leakNode.parent
+    }
+    path.add(0, leakNode.objectId)
+    return path
   }
 
   fun dominator(objectId: Long): Long {
