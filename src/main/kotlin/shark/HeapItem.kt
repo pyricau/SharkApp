@@ -50,10 +50,10 @@ sealed class HeapItem {
       }
 
       graph.dominating(objectId)?.let { dominating ->
-        val retainedSize = humanReadableByteCount(dominating.retainedSize.toLong())
-        val shallowSize = humanReadableByteCount(dominating.shallowSize.toLong())
-        items += boringItem("Shallow size: $shallowSize")
-        items += boringItem("Retaining $retainedSize in ${dominating.retainedCount} objects")
+        val retainedSize = dominating.retainedSize.toHumanReadableBytes()
+        if (dominating.retainedCount > 1) {
+          items += boringItem("Retaining $retainedSize in ${dominating.retainedCount} objects")
+        }
         if (dominating.dominatedObjectIds.isNotEmpty()) {
           items += sectionHeader("Dominating", HeapDominatingItem(objectId))
         }
@@ -134,11 +134,18 @@ sealed class HeapItem {
         items += boringSection("Inspections", reporter.labels.toList())
       }
 
+      val dominatorId = graph.dominator(objectId)
+      if (dominatorId != ValueHolder.NULL_REFERENCE) {
+        items += graph.findObjectById(dominatorId).toTreeItem(graph, "Dominator: ")
+      }
+
+      items += boringItem("Shallow size: ${graph.computeSize(objectId).toHumanReadableBytes()}")
+
       graph.dominating(objectId)?.let { dominating ->
-        val retainedSize = humanReadableByteCount(dominating.retainedSize.toLong())
-        val shallowSize = humanReadableByteCount(dominating.shallowSize.toLong())
-        items += boringItem("Shallow size: $shallowSize")
-        items += boringItem("Retaining $retainedSize in ${dominating.retainedCount} objects")
+        val retainedSize = dominating.retainedSize.toHumanReadableBytes()
+        if (dominating.retainedCount > 1) {
+          items += boringItem("Retaining $retainedSize in ${dominating.retainedCount} objects")
+        }
         if (dominating.dominatedObjectIds.isNotEmpty()) {
           items += sectionHeader("Dominating", HeapDominatingItem(objectId))
         }
@@ -233,10 +240,10 @@ fun boringSection(name: String, boringItems: List<String>): TreeItem<HeapItem> {
   )
 }
 
-fun HeapObject.toTreeItem(graph: LoadedGraph): TreeItem<HeapItem> {
+fun HeapObject.toTreeItem(graph: LoadedGraph, prefix: String = ""): TreeItem<HeapItem> {
   return when (this) {
-    is HeapClass -> toTreeItem(graph.instanceCount(objectId))
-    is HeapInstance -> toTreeItem()
+    is HeapClass -> toTreeItem(graph.instanceCount(objectId), prefix)
+    is HeapInstance -> toTreeItem(prefix)
     else -> boringItem("$this not supported yet")
   }
 }
@@ -320,11 +327,13 @@ private fun ObjectReporter.resolveStatus(
   return status to reason
 }
 
+private fun Int.toHumanReadableBytes() = toLong().toHumanReadableBytes()
+
 // https://stackoverflow.com/a/3758880
-private fun humanReadableByteCount(bytes: Long): String {
+private fun Long.toHumanReadableBytes(): String {
   val unit = 1000
-  if (bytes < unit) return "$bytes B"
-  val exp = (ln(bytes.toDouble()) / ln(unit.toDouble())).toInt()
+  if (this < unit) return "$this B"
+  val exp = (ln(this.toDouble()) / ln(unit.toDouble())).toInt()
   val pre = "kMGTPE"[exp - 1]
-  return String.format("%.1f %sB", bytes / unit.toDouble().pow(exp.toDouble()), pre)
+  return String.format("%.1f %sB", this / unit.toDouble().pow(exp.toDouble()), pre)
 }
