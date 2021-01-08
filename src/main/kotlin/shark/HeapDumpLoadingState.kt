@@ -16,7 +16,19 @@ class HeapDumpLoadingState(val file: File, val ioExecutor: ExecutorService) {
     }
     println("Opening ${file.path}")
     ioExecutor.execute {
-      loadedGraph.value = file.openHeapGraph()
+      val fileSourceProvider = FileSourceProvider(file)
+      val wrapper = object : DualSourceProvider by fileSourceProvider{
+        override fun openRandomAccessSource(): RandomAccessSource {
+          val realSource = fileSourceProvider.openRandomAccessSource()
+          return object : RandomAccessSource by realSource {
+            override fun read(sink: okio.Buffer, position: Long, byteCount: Long): Long {
+              println("IO from thread ${Thread.currentThread().name}")
+              return realSource.read(sink, position, byteCount)
+            }
+          }
+        }
+      }
+      loadedGraph.value = wrapper.openHeapGraph()
     }
   }
 }
