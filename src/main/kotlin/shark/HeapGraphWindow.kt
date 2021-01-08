@@ -147,7 +147,9 @@ fun HeapGraphScreen(
             heapItem.expand(graph, classesWithInstanceCounts)
           },
           onDoubleClick = { selectedItems ->
-            val showTree = ShowTree("Selected items", selectedItems)
+            val showTree = ShowTree(
+              "Selected items",
+              selectedItems.map { if (it.expended) it.copy(expended = false) else it })
             goTo(showTree)
           }
         )
