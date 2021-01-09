@@ -11,7 +11,11 @@ import androidx.compose.desktop.WindowEvents
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.onActive
 import androidx.compose.ui.input.key.ExperimentalKeyInput
+import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.window.KeyStroke
+import androidx.compose.ui.window.Menu
+import androidx.compose.ui.window.MenuBar
 import androidx.compose.ui.window.MenuItem
 import androidx.compose.ui.window.Tray
 import java.awt.FileDialog
@@ -25,39 +29,54 @@ import javax.imageio.ImageIO
 import javax.swing.SwingUtilities.invokeLater
 
 fun main() {
+  // To use Apple global menu.
+  System.setProperty("apple.laf.useScreenMenuBar", "true")
+  // Set application name
+  System.setProperty("com.apple.mrj.application.apple.menu.about.name", "SharkApp")
+
   val image = getWindowIcon()
+
   showStartWindow(image)
 }
 
-private fun showStartWindow(image: BufferedImage) {
-  val onSelectFileClick: (() -> Unit) -> Unit = { closeStartWindow ->
-    // TODO Sleep a bit or something to give time for the ripple
-    val fileDialog = FileDialog(null as Frame?, "Select hprof file")
-    fileDialog.isVisible = true
+private fun selectHeapDumpFile(onHeapGraphWindowShown: () -> Unit = {}) {
+  val fileDialog = FileDialog(null as Frame?, "Select hprof file")
+  fileDialog.isVisible = true
 
-    if (fileDialog.file != null && fileDialog.file.endsWith(".hprof")) {
-      val heapDumpFile = File(fileDialog.directory, fileDialog.file)
-      showHeapGraphWindow(heapDumpFile) {
-        closeStartWindow()
-      }
+  if (fileDialog.file != null && fileDialog.file.endsWith(".hprof")) {
+    val heapDumpFile = File(fileDialog.directory, fileDialog.file)
+    showHeapGraphWindow(heapDumpFile) {
+      onHeapGraphWindowShown()
     }
   }
-
-  showStartWindow(image, onSelectFileClick)
 }
 
-private fun showStartWindow(
-  image: BufferedImage,
-  onSelectFileClick: (() -> Unit) -> Unit
-) {
+private fun showStartWindow(image: BufferedImage) {
   invokeLater {
-    val appWindow = AppWindow(title = "SharkApp", size = IntSize(300, 300), icon = image)
-    appWindow.show {
-      StartingWindow {
-        onSelectFileClick {
-          appWindow.close()
-        }
+    lateinit var appWindow: AppWindow
+    val selectHeapDumpFile = {
+      selectHeapDumpFile {
+        appWindow.close()
       }
+    }
+    appWindow = AppWindow(
+      title = "SharkApp", size = IntSize(300, 300), icon = image,
+      menuBar = MenuBar(
+        Menu(
+          name = "File",
+          MenuItem(
+            name = "Open Heap Dump",
+            onClick = {
+              selectHeapDumpFile()
+            },
+            shortcut = KeyStroke(Key.O)
+          ),
+        )
+      )
+    )
+
+    appWindow.show {
+      StartingWindow(onSelectFileClick = selectHeapDumpFile)
     }
   }
 }
@@ -82,13 +101,31 @@ fun showHeapGraphWindow(heapDumpFile: File, onWindowShown: () -> Unit) {
   loadingState.load()
 
   invokeLater {
-    val appWindow = AppWindow(
+    lateinit var appWindow: AppWindow
+    appWindow = AppWindow(
       title = "${heapDumpFile.name} - SharkApp",
       events = WindowEvents(onClose = {
         loadingState.loadedGraph.value?.close()
         loadingState.ioExecutor.shutdown()
         println("Closed ${heapDumpFile.path}")
-      })
+      }),
+      menuBar = MenuBar(
+        Menu(
+          name = "File",
+          MenuItem(
+            name = "Open Heap Dump",
+            onClick = ::selectHeapDumpFile,
+            shortcut = KeyStroke(Key.O)
+          ),
+          MenuItem(
+            name = "Close Heap Dump",
+            onClick = {
+              appWindow.close()
+            },
+            shortcut = KeyStroke(Key.W)
+          )
+        ),
+      )
     )
 
     val pressedKeys = PressedKeys()
@@ -114,22 +151,6 @@ fun showHeapGraphWindow(heapDumpFile: File, onWindowShown: () -> Unit) {
     }
 
     appWindow.show {
-      onActive {
-        val tray = Tray().apply {
-          icon(getWindowIcon())
-          menu(
-            MenuItem(
-              name = "Quit App",
-              onClick = { AppManager.exit() }
-            )
-          )
-        }
-        onDispose {
-          tray.remove()
-        }
-      }
-
-
       HeapGraphWindow(loadingState, pressedKeys)
     }
 
@@ -150,7 +171,7 @@ fun ScreenTransition(visible: Boolean, forward: Boolean, content: @Composable ()
     content()
   }
   // TODO Figure out how to make transitions work.
-  if (true)  {
+  if (true) {
     return
   }
   if (forward) {

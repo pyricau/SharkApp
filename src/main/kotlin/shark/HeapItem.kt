@@ -340,10 +340,10 @@ private fun ObjectReporter.resolveStatus(
   return status to reason
 }
 
-private fun Int.toHumanReadableBytes() = toLong().toHumanReadableBytes()
+fun Int.toHumanReadableBytes() = toLong().toHumanReadableBytes()
 
 // https://stackoverflow.com/a/3758880
-private fun Long.toHumanReadableBytes(): String {
+fun Long.toHumanReadableBytes(): String {
   val unit = 1000
   if (this < unit) return "$this B"
   val exp = (ln(this.toDouble()) / ln(unit.toDouble())).toInt()

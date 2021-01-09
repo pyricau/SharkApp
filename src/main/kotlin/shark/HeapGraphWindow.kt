@@ -90,6 +90,9 @@ fun HeapGraphScreen(
           }
         }
         Text(text = "Home")
+
+        val root = graph.dominating(0)!!
+        Text(text = "Total retained: ${root.retainedSize.toHumanReadableBytes()} (${root.retainedCount} objects)")
         WrapTextBox("Tree", onClick = {
           val showTree =
             ShowTree(
