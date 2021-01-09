@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material.Button
 import androidx.compose.material.MaterialTheme
 import androidx.compose.material.Text
+import androidx.compose.material.TextField
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -105,21 +106,26 @@ fun HeapGraphScreen(
           goTo(showTree)
         })
         WrapTextBox("Leaks", onClick = {
-          goTo(ShowTree(
-            "Leaking objects",
-            graph.leakingObjectIds.map { graph.findObjectById(it).toTreeItem(graph) }.toList()
-          ))
+          goTo(
+            ShowTree(
+              "Leaking objects",
+              graph.leakingObjectIds.map { graph.findObjectById(it).toTreeItem(graph) }.toList()
+            )
+          )
         })
         WrapTextBox("All objects", onClick = {
-          goTo(ShowTree(
-            "All objects",
-            graph.objects.map { it.toTreeItem(graph) }.toList()
-          ))
+          goTo(
+            ShowTree(
+              "All objects",
+              graph.objects.map { it.toTreeItem(graph) }.toList()
+            )
+          )
         })
         WrapTextBox("Dominators", onClick = {
           goTo(ShowTree(
             "Dominators",
-            graph.dominatorsSortedRetained().filter { it != 0L }.map { graph.findObjectById(it).toTreeItem(graph) }
+            graph.dominatorsSortedRetained().filter { it != 0L }
+              .map { graph.findObjectById(it).toTreeItem(graph) }
           ))
         })
         Text(text = "Recents")
@@ -144,6 +150,13 @@ fun HeapGraphScreen(
         }
         Text(text = "$showing")
 
+        var filter by remember { mutableStateOf("") }
+
+        TextField(
+          value = filter,
+          onValueChange = { filter = it },
+        )
+
         TreeView(
           pressedKeys = pressedKeys,
           rootItems = showing.initialItems,
@@ -155,7 +168,8 @@ fun HeapGraphScreen(
               "Selected items",
               selectedItems.map { if (it.expended) it.copy(expended = false) else it })
             goTo(showTree)
-          }
+          },
+          filter
         )
       }
     }

@@ -86,13 +86,26 @@ fun <T> TreeView(
   pressedKeys: PressedKeys,
   rootItems: List<TreeItem<T>>,
   expandItem: (T) -> List<TreeItem<T>>,
-  onDoubleClick: (List<TreeItem<T>>) -> Unit = {}
+  onDoubleClick: (List<TreeItem<T>>) -> Unit = {},
+  filter: String
 ) {
   val scope = rememberCoroutineScope()
   var delayedClick by remember { mutableStateOf<Job?>(null) }
 
   var tree: List<TreeNode<T>> by remember(rootItems) {
     mutableStateOf(rootItems.map { TreeNode(it, false, 0, true) })
+  }
+
+  val filteredTree = mutableListOf<TreeNode<T>>()
+  var keep = true
+
+  for (node in tree) {
+    if (node.level == 0) {
+      keep = filter in node.item.name
+    }
+    if (keep) {
+      filteredTree += node
+    }
   }
 
   var lastRowClick by remember { mutableStateOf<Pair<Int, Instant>?>(null) }
@@ -104,8 +117,12 @@ fun <T> TreeView(
 
   var selectionViaMeta by remember { mutableStateOf(false) }
 
-  TreeView(tree) { clickedItemIndex, itemClickEvent ->
+  TreeView(filteredTree) { filteredClickedItemIndex, itemClickEvent ->
+
+    val filteredClickedNode = filteredTree[filteredClickedItemIndex]
+    val clickedItemIndex = tree.indexOfFirst { it.id == filteredClickedNode.id }
     val node = tree[clickedItemIndex]
+
     when (itemClickEvent) {
       TOGGLE_EXPAND -> {
         lastRowClick = null
