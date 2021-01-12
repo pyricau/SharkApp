@@ -44,7 +44,7 @@ sealed class HeapItem {
     graph: LoadedGraph
   ): List<TreeItem<HeapItem>> = emptyList()
 
-  class HeapClassItem(private val objectId: Long) : HeapItem() {
+  class HeapClassItem(val objectId: Long) : HeapItem() {
     override fun expand(graph: LoadedGraph): List<TreeItem<HeapItem>> {
       val heapClass = graph.findObjectById(objectId) as HeapClass
       val superclass = heapClass.superclass
@@ -120,7 +120,7 @@ sealed class HeapItem {
     }
   }
 
-  class HeapInstanceItem(private val objectId: Long) : HeapItem() {
+  class HeapInstanceItem(val objectId: Long) : HeapItem() {
     override fun expand(graph: LoadedGraph): List<TreeItem<HeapItem>> {
       val heapInstance = graph.findObjectById(objectId) as HeapInstance
 
@@ -195,7 +195,7 @@ sealed class HeapItem {
     }
   }
 
-  class HeapPrimitiveArrayItem(private val objectId: Long) : HeapItem() {
+  class HeapPrimitiveArrayItem(val objectId: Long) : HeapItem() {
     override fun expand(graph: LoadedGraph): List<TreeItem<HeapItem>> {
       // TODO Add common pieces to all objects
 
@@ -213,7 +213,7 @@ sealed class HeapItem {
     }
   }
 
-  class HeapObjectArrayItem(private val objectId: Long) : HeapItem() {
+  class HeapObjectArrayItem(val objectId: Long) : HeapItem() {
     override fun expand(graph: LoadedGraph): List<TreeItem<HeapItem>> {
       val heapObjectArray = graph.findObjectById(objectId) as HeapObjectArray
       return heapObjectArray.readRecord().elementIds.mapIndexed { index,  itemObjectId ->
@@ -376,11 +376,13 @@ fun HeapClass.toTreeItem(
 }
 
 fun HeapInstance.toTreeItem(prefix: String = "", suffix: String = ""): TreeItem<HeapItem> {
+  val stringContent =  readAsJavaString()?.let { " \"$it\"" }?:""
+
   return TreeItem(
     HeapInstanceItem(objectId),
     expandable = true,
     expended = false,
-    name = "${prefix}Instance ${instanceClassName}@${objectId}$suffix",
+    name = "${prefix}Instance ${instanceClassName}@${objectId}$stringContent$suffix",
     selectable = true,
     filterKey = instanceClassName
   )
@@ -391,7 +393,7 @@ fun HeapPrimitiveArray.toTreeItem(prefix: String = "", suffix: String = ""): Tre
     HeapPrimitiveArrayItem(objectId),
     expandable = true,
     expended = false,
-    name = "${prefix}Array of ${primitiveType.name}[$recordSize]@${objectId}$suffix",
+    name = "${prefix}Array ${primitiveType.name.toLowerCase()}[$recordSize]@${objectId}$suffix",
     selectable = true,
     filterKey = arrayClassName
   )
@@ -402,7 +404,7 @@ fun HeapObjectArray.toTreeItem(prefix: String = "", suffix: String = ""): TreeIt
     HeapObjectArrayItem(objectId),
     expandable = true,
     expended = false,
-    name = "${prefix}Array of ${arrayClassName.substringBeforeLast("[]")}[$recordSize]@${objectId}$suffix",
+    name = "${prefix}Array ${arrayClassName.substringBeforeLast("[]")}[$recordSize]@${objectId}$suffix",
     selectable = true,
     filterKey = arrayClassName
   )
@@ -428,8 +430,8 @@ fun HeapField.toTreeItem(graph: LoadedGraph, prefix: String = ""): TreeItem<Heap
             "${prefix}$name = "
           )
           is HeapInstance -> referencedObject.toTreeItem("${prefix}$name = ")
-          is HeapObjectArray -> boringItem("object array")
-          is HeapPrimitiveArray -> boringItem("primitive array")
+          is HeapObjectArray -> referencedObject.toTreeItem("${prefix}$name = ")
+          is HeapPrimitiveArray -> referencedObject.toTreeItem("${prefix}$name = ")
         }
       }
     }

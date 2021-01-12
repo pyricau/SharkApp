@@ -69,7 +69,7 @@ fun GridCard(
   }
 }
 
-private fun applyTextStyle(
+fun applyTextStyle(
   textStyle: TextStyle,
   contentAlpha: Float,
   text: @Composable (() -> Unit)?

@@ -8,5 +8,6 @@ sealed class Screen {
     override val title = "Home"
   }
 
-  class HeapObjectTree(override val title: String, val initialItems: List<TreeItem<HeapItem>>) : Screen()
+  class HeapObjectTree(override val title: String, val initialItems: List<TreeItem<HeapItem>>) :
+    Screen()
 }

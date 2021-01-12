@@ -51,17 +51,24 @@ fun HeapGraphWindow(
       LoadingScreen(loadingState.file.name)
     } else {
 
-      var recents by remember { mutableStateOf(listOf(ShowingWithUniqueTitle(Home()))) }
-      var backstack by remember { mutableStateOf(listOf<Screen>(Home())) }
+      // Wraps screen so that the same screen can be at different parts of the backstack
+      // ising different wrapper instances.
+      class ScreenUniqueByIdentify(val screen: Screen)
+
+      fun Screen.byIdentity() = ScreenUniqueByIdentify(this)
+
+
+      var recents by remember { mutableStateOf(listOf(Home().toRecent())) }
+      var backstack by remember { mutableStateOf(listOf(Home().byIdentity())) }
       var forwardStack by remember { mutableStateOf(listOf<Screen>()) }
       var drawerVisible by remember { mutableStateOf(false) }
 
       val goBack = {
         val dropped = backstack.last()
-        forwardStack += dropped
+        forwardStack += dropped.screen
         backstack = backstack.dropLast(1)
-        val destination = backstack.last()
-        val showingForRecents = ShowingWithUniqueTitle(destination)
+        val destination = backstack.last().screen
+        val showingForRecents = destination.toRecent()
         recents = listOf(showingForRecents) + (recents - showingForRecents)
       }
       // TODO Not super clear this is an ok way to handle this. How does one have a global
@@ -70,15 +77,15 @@ fun HeapGraphWindow(
       val goForward = {
         val destination = forwardStack.last()
         forwardStack = forwardStack.dropLast(1)
-        backstack += destination
-        val showingForRecents = ShowingWithUniqueTitle(destination)
+        backstack += destination.byIdentity()
+        val showingForRecents = destination.toRecent()
         recents = listOf(showingForRecents) + (recents - showingForRecents)
       }
       goForwardForKeys = goForward
       val goTo: (Screen) -> Unit = { destination ->
-        backstack = (backstack - destination) + destination
+        backstack += destination.byIdentity()
         forwardStack = emptyList()
-        val showingForRecents = ShowingWithUniqueTitle(destination)
+        val showingForRecents = destination.toRecent()
         recents = listOf(showingForRecents) + (recents - showingForRecents)
       }
       val scaffoldState = rememberScaffoldState(rememberDrawerState(DrawerValue.Closed))
@@ -86,7 +93,7 @@ fun HeapGraphWindow(
         scaffoldState = scaffoldState,
         topBar = {
           HeapGraphTopBar(
-            backstack = backstack,
+            backstack = backstack.map { it.screen },
             forwardStack = forwardStack,
             goBack = goBack,
             goForward = goForward,
@@ -95,8 +102,8 @@ fun HeapGraphWindow(
       ) {
         Row {
           HeapGraphDrawer(drawerVisible = drawerVisible, recents = recents, goTo = goTo)
-          Backstack(backstack) { screen ->
-            when (screen) {
+          Backstack(backstack) { wrappedScreen ->
+            when (val screen = wrappedScreen.screen) {
               is Home -> HomeScreen(loadedGraph, goTo)
               is HeapObjectTree -> HeapObjectTreeScreen(loadedGraph, pressedKeys, screen, goTo)
             }
@@ -104,15 +111,5 @@ fun HeapGraphWindow(
         }
       }
     }
-  }
-}
-
-class ShowingWithUniqueTitle(val screen: Screen) {
-  override fun hashCode(): Int {
-    return screen.title.hashCode()
-  }
-
-  override fun equals(other: Any?): Boolean {
-    return other is ShowingWithUniqueTitle && screen.title == other.screen.title
   }
 }
