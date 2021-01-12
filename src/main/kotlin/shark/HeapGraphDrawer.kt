@@ -2,6 +2,10 @@ package shark
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.ExperimentalAnimationApi
+import androidx.compose.animation.expandHorizontally
+import androidx.compose.animation.shrinkHorizontally
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.VerticalScrollbar
 import androidx.compose.foundation.clickable
@@ -32,7 +36,11 @@ fun HeapGraphDrawer(
   recents: List<ShowingWithUniqueTitle>,
   goTo: (Screen) -> Unit,
 ) {
-  AnimatedVisibility(visible = drawerVisible) {
+  AnimatedVisibility(
+    visible = drawerVisible,
+    enter = expandHorizontally(),
+    exit = shrinkHorizontally()
+  ) {
     Row {
       Column(modifier = Modifier.width(48.dp * 5)) {
         val start = Home()
