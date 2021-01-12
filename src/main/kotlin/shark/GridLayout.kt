@@ -6,6 +6,8 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.unit.Constraints
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import kotlin.math.ceil
 import kotlin.math.floor
@@ -15,6 +17,7 @@ import kotlin.math.min
 fun GridLayout(
   modifier: Modifier = Modifier,
   scrollState: ScrollState = rememberScrollState(0f),
+  itemWidth: Dp,
   content: @Composable() () -> Unit
 ) {
   Layout(
@@ -27,20 +30,22 @@ fun GridLayout(
     if (measurables.isEmpty()) {
       return@Layout layout(0, 0) {}
     }
-    val placeables = measurables.map { measurable ->
-      val pl = measurable.measure(constraints)
-      pl
-    }
-
 
     val layoutWidth = constraints.maxWidth
 
-    val itemWidth = placeables.maxByOrNull { it.width }!!.width
-    val itemHeight = placeables.maxByOrNull { it.height }!!.height
+    val itemWidthPx = itemWidth.toIntPx()
+
+    val itemHeightPx = measurables.maxOf { it.minIntrinsicHeight(itemWidthPx) }
+
+    val childConstraints = Constraints.fixed(itemWidthPx, itemHeightPx)
+    val placeables = measurables.map { measurable ->
+      measurable.measure(childConstraints)
+    }
 
     val minSpacing = 24.dp.toIntPx()
 
-    val columnCount = floor((layoutWidth - minSpacing) / (itemWidth + minSpacing).toFloat()).toInt()
+    val columnCount =
+      floor((layoutWidth - minSpacing) / (itemWidthPx + minSpacing).toFloat()).toInt()
 
     // Not enough space.
     if (columnCount == 0) {
@@ -49,16 +54,18 @@ fun GridLayout(
 
     val rowCount = ceil(placeables.size / columnCount.toFloat()).toInt()
     val horizontalSpacing =
-      floor((layoutWidth - (columnCount * itemWidth)) / (columnCount + 1).toFloat()).toInt()
-    val remainingPixels = layoutWidth - (horizontalSpacing + columnCount * (itemWidth + horizontalSpacing))
+      floor((layoutWidth - (columnCount * itemWidthPx)) / (columnCount + 1).toFloat()).toInt()
+    val remainingPixels =
+      layoutWidth - (horizontalSpacing + columnCount * (itemWidthPx + horizontalSpacing))
     val evenRemainingPixels = remainingPixels % 2 == 0
-    val leftPadding = horizontalSpacing + if (evenRemainingPixels) remainingPixels / 2 else ((remainingPixels - 1) / 2) + 1
+    val leftPadding =
+      horizontalSpacing + if (evenRemainingPixels) remainingPixels / 2 else ((remainingPixels - 1) / 2) + 1
     val verticalSpacing = min(horizontalSpacing, 48.dp.toIntPx())
 
     val topBottomPadding = verticalSpacing
 
     val layoutHeight =
-      2 * topBottomPadding + (rowCount * itemHeight) + (rowCount - 1) * verticalSpacing
+      2 * topBottomPadding + (rowCount * itemHeightPx) + (rowCount - 1) * verticalSpacing
 
     layout(layoutWidth, layoutHeight) {
       placeables.forEachIndexed { index, placeable ->
@@ -66,8 +73,8 @@ fun GridLayout(
         val row = (index - column) / columnCount
 
         placeable.placeRelative(
-          x = leftPadding + (itemWidth + horizontalSpacing) * column,
-          y = topBottomPadding + ((itemHeight + verticalSpacing) * row)
+          x = leftPadding + (itemWidthPx + horizontalSpacing) * column,
+          y = topBottomPadding + ((itemHeightPx + verticalSpacing) * row)
         )
       }
     }
