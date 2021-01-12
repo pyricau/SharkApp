@@ -3,15 +3,29 @@ package shark
 import shark.HeapItem.BoringItems
 import shark.HeapItem.HeapClassItem
 import shark.HeapItem.HeapInstanceItem
+import shark.HeapItem.HeapObjectArrayItem
+import shark.HeapItem.HeapPrimitiveArrayItem
 import shark.HeapItem.NotExpandable
 import shark.HeapObject.HeapClass
 import shark.HeapObject.HeapInstance
 import shark.HeapObject.HeapObjectArray
 import shark.HeapObject.HeapPrimitiveArray
+import shark.HprofRecord.HeapDumpRecord.ObjectRecord.PrimitiveArrayDumpRecord.BooleanArrayDump
+import shark.HprofRecord.HeapDumpRecord.ObjectRecord.PrimitiveArrayDumpRecord.ByteArrayDump
+import shark.HprofRecord.HeapDumpRecord.ObjectRecord.PrimitiveArrayDumpRecord.CharArrayDump
+import shark.HprofRecord.HeapDumpRecord.ObjectRecord.PrimitiveArrayDumpRecord.DoubleArrayDump
+import shark.HprofRecord.HeapDumpRecord.ObjectRecord.PrimitiveArrayDumpRecord.FloatArrayDump
+import shark.HprofRecord.HeapDumpRecord.ObjectRecord.PrimitiveArrayDumpRecord.IntArrayDump
+import shark.HprofRecord.HeapDumpRecord.ObjectRecord.PrimitiveArrayDumpRecord.LongArrayDump
+import shark.HprofRecord.HeapDumpRecord.ObjectRecord.PrimitiveArrayDumpRecord.ShortArrayDump
 import shark.LeakTraceObject.LeakingStatus
 import shark.LeakTraceObject.LeakingStatus.LEAKING
 import shark.LeakTraceObject.LeakingStatus.NOT_LEAKING
 import shark.LeakTraceObject.LeakingStatus.UNKNOWN
+import shark.LeakTraceReference.ReferenceType.ARRAY_ENTRY
+import shark.LeakTraceReference.ReferenceType.INSTANCE_FIELD
+import shark.LeakTraceReference.ReferenceType.LOCAL
+import shark.LeakTraceReference.ReferenceType.STATIC_FIELD
 import shark.ValueHolder.BooleanHolder
 import shark.ValueHolder.ByteHolder
 import shark.ValueHolder.CharHolder
@@ -131,7 +145,8 @@ sealed class HeapItem {
       }
 
       if (reporter.labels.isNotEmpty()) {
-        items += boringSection("Inspections", reporter.labels.toList())
+        val labels = reporter.labels.toList()
+        items += boringSection("Inspections (${labels.size})", labels)
       }
 
       items += sectionHeader("Shortest path from GC Roots", HeapShortestPathItem(objectId))
@@ -180,6 +195,38 @@ sealed class HeapItem {
     }
   }
 
+  class HeapPrimitiveArrayItem(private val objectId: Long) : HeapItem() {
+    override fun expand(graph: LoadedGraph): List<TreeItem<HeapItem>> {
+      // TODO Add common pieces to all objects
+
+      val heapPrimitiveArray = graph.findObjectById(objectId) as HeapPrimitiveArray
+      return when (val record = heapPrimitiveArray.readRecord()) {
+        is BooleanArrayDump -> record.array.mapIndexed { index, value -> boringItem("[$index] = $value") }
+        is CharArrayDump -> record.array.mapIndexed { index, value -> boringItem("[$index] = $value") }
+        is FloatArrayDump -> record.array.mapIndexed { index, value -> boringItem("[$index] = $value") }
+        is DoubleArrayDump -> record.array.mapIndexed { index, value -> boringItem("[$index] = $value") }
+        is ByteArrayDump -> record.array.mapIndexed { index, value -> boringItem("[$index] = $value") }
+        is ShortArrayDump -> record.array.mapIndexed { index, value -> boringItem("[$index] = $value") }
+        is IntArrayDump -> record.array.mapIndexed { index, value -> boringItem("[$index] = $value") }
+        is LongArrayDump -> record.array.mapIndexed { index, value -> boringItem("[$index] = $value") }
+      }
+    }
+  }
+
+  class HeapObjectArrayItem(private val objectId: Long) : HeapItem() {
+    override fun expand(graph: LoadedGraph): List<TreeItem<HeapItem>> {
+      val heapObjectArray = graph.findObjectById(objectId) as HeapObjectArray
+      return heapObjectArray.readRecord().elementIds.mapIndexed { index,  itemObjectId ->
+        if (itemObjectId == 0L) {
+          boringItem("[$index] = null")
+        } else {
+          val heapObject = graph.findObjectById(itemObjectId)
+          heapObject.toTreeItem(graph, prefix = "[$index] = ")
+        }
+      }
+    }
+  }
+
   class HeapDominatingItem(private val objectId: Long) : HeapItem() {
     override fun expand(graph: LoadedGraph): List<TreeItem<HeapItem>> {
       val dominating = graph.dominating(objectId)
@@ -194,11 +241,55 @@ sealed class HeapItem {
 
   class HeapShortestPathItem(private val objectId: Long) : HeapItem() {
     override fun expand(graph: LoadedGraph): List<TreeItem<HeapItem>> {
-      val path = graph.shortestPathFromGcRoots(objectId)
-      return if (path.isEmpty()) {
+      val shortestPath = graph.shortestPathFromGcRoots(objectId)
+      return if (shortestPath == null) {
         listOf(boringItem("Not reachable via strong refs"))
       } else {
-        path.map { graph.findObjectById(it).toTreeItem(graph) }
+        val refs = shortestPath.path.map { it.ref }
+        val ids = listOf(shortestPath.rootHeldObjectId) + shortestPath.path.map { it.objectId }
+        val pathItems = mutableListOf<TreeItem<HeapItem>>()
+        pathItems += boringItem("GC Root: ${shortestPath.gcRoot.toHumanReadableName()} ↓")
+        pathItems += ids.mapIndexed { index, objectId ->
+          if (index <= refs.lastIndex) {
+
+            val heapObject = graph.findObjectById(objectId)
+
+            val heapObjectName = when (heapObject) {
+              is HeapClass -> heapObject.name
+              is HeapInstance -> heapObject.instanceClassName
+              is HeapObjectArray -> heapObject.arrayClassName
+              is HeapPrimitiveArray -> heapObject.arrayClassName
+            }
+
+            val refToNext = refs[index]
+            refToNext.refFromParentType
+
+            val static = if (refToNext.refFromParentType == STATIC_FIELD) " static" else ""
+
+            val refOwningClassName = if (refToNext.owningClassId != 0L) {
+              val (heapClass, _) = graph.findClassById(refToNext.owningClassId)
+              heapClass.name
+            } else {
+              heapObjectName
+            }
+
+            val refOwningClassSimpleName = refOwningClassName.lastSegment('.')
+
+            val referenceDisplayName = when (refToNext.refFromParentType) {
+              ARRAY_ENTRY -> "[${refToNext.refFromParentName}]"
+              STATIC_FIELD, INSTANCE_FIELD -> refToNext.refFromParentName
+              LOCAL -> "<Java Local>"
+            }
+
+            val referenceLine =
+              " ↓$static $refOwningClassSimpleName.$referenceDisplayName"
+
+            heapObject.toTreeItem(graph, suffix = referenceLine)
+          } else {
+            graph.findObjectById(objectId).toTreeItem(graph)
+          }
+        }
+        pathItems
       }
     }
   }
@@ -229,7 +320,8 @@ fun boringItem(name: String): TreeItem<HeapItem> {
     expandable = false,
     expended = false,
     name = name,
-    selectable = false
+    selectable = false,
+    filterKey = null
   )
 }
 
@@ -239,7 +331,8 @@ fun sectionHeader(name: String, item: HeapItem): TreeItem<HeapItem> {
     expandable = true,
     expended = false,
     name = name,
-    selectable = false
+    selectable = false,
+    filterKey = null
   )
 }
 
@@ -249,38 +342,69 @@ fun boringSection(name: String, boringItems: List<String>): TreeItem<HeapItem> {
     expandable = true,
     expended = false,
     name = name,
-    selectable = false
+    selectable = false,
+    filterKey = null
   )
 }
 
-fun HeapObject.toTreeItem(graph: LoadedGraph, prefix: String = ""): TreeItem<HeapItem> {
+fun HeapObject.toTreeItem(
+  graph: LoadedGraph,
+  prefix: String = "",
+  suffix: String = ""
+): TreeItem<HeapItem> {
   return when (this) {
-    is HeapClass -> toTreeItem(graph.instanceCount(objectId), prefix)
-    is HeapInstance -> toTreeItem(prefix)
-    else -> boringItem("$this not supported yet")
+    is HeapClass -> toTreeItem(graph.instanceCount(objectId), prefix, suffix)
+    is HeapInstance -> toTreeItem(prefix, suffix)
+    is HeapPrimitiveArray -> toTreeItem(prefix, suffix)
+    is HeapObjectArray -> toTreeItem(prefix, suffix)
   }
 }
 
 fun HeapClass.toTreeItem(
   instanceCount: Int,
-  prefix: String = ""
+  prefix: String = "",
+  suffix: String = ""
 ): TreeItem<HeapItem> {
   return TreeItem(
     HeapClassItem(objectId),
     expandable = true,
     expended = false,
-    name = "${prefix}Class $name ($instanceCount instances)",
-    selectable = true
+    name = "${prefix}Class $name ($instanceCount instances)$suffix",
+    selectable = true,
+    filterKey = name
   )
 }
 
-fun HeapInstance.toTreeItem(prefix: String = ""): TreeItem<HeapItem> {
+fun HeapInstance.toTreeItem(prefix: String = "", suffix: String = ""): TreeItem<HeapItem> {
   return TreeItem(
     HeapInstanceItem(objectId),
     expandable = true,
     expended = false,
-    name = "${prefix}Instance ${instanceClassName}@${objectId}",
-    selectable = true
+    name = "${prefix}Instance ${instanceClassName}@${objectId}$suffix",
+    selectable = true,
+    filterKey = instanceClassName
+  )
+}
+
+fun HeapPrimitiveArray.toTreeItem(prefix: String = "", suffix: String = ""): TreeItem<HeapItem> {
+  return TreeItem(
+    HeapPrimitiveArrayItem(objectId),
+    expandable = true,
+    expended = false,
+    name = "${prefix}Array of ${primitiveType.name}[$recordSize]@${objectId}$suffix",
+    selectable = true,
+    filterKey = arrayClassName
+  )
+}
+
+fun HeapObjectArray.toTreeItem(prefix: String = "", suffix: String = ""): TreeItem<HeapItem> {
+  return TreeItem(
+    HeapObjectArrayItem(objectId),
+    expandable = true,
+    expended = false,
+    name = "${prefix}Array of ${arrayClassName.substringBeforeLast("[]")}[$recordSize]@${objectId}$suffix",
+    selectable = true,
+    filterKey = arrayClassName
   )
 }
 
@@ -349,4 +473,22 @@ fun Long.toHumanReadableBytes(): String {
   val exp = (ln(this.toDouble()) / ln(unit.toDouble())).toInt()
   val pre = "kMGTPE"[exp - 1]
   return String.format("%.1f %sB", this / unit.toDouble().pow(exp.toDouble()), pre)
+}
+
+fun GcRoot.toHumanReadableName() = when (this) {
+  is GcRoot.JniGlobal -> "Global variable in native code"
+  is GcRoot.JniLocal -> "Local variable in native code"
+  is GcRoot.JavaFrame -> "Java local variable"
+  is GcRoot.NativeStack -> "Input or output parameters in native code"
+  is GcRoot.StickyClass -> "System class"
+  is GcRoot.ThreadBlock -> "Thread block"
+  is GcRoot.MonitorUsed -> "Monitor (anything that called the wait() or notify() methods, or that is synchronized.)"
+  is GcRoot.ThreadObject -> "Thread object"
+  is GcRoot.JniMonitor -> "Root JNI monitor"
+  else -> throw IllegalStateException("Unexpected gc root $this")
+}
+
+fun String.lastSegment(segmentingChar: Char): String {
+  val separator = lastIndexOf(segmentingChar)
+  return if (separator == -1) this else this.substring(separator + 1)
 }

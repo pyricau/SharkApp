@@ -22,7 +22,6 @@ import androidx.compose.material.AmbientContentColor
 import androidx.compose.material.Icon
 import androidx.compose.material.MaterialTheme
 import androidx.compose.material.Surface
-import androidx.compose.material.Text
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowRight
@@ -64,7 +63,8 @@ data class TreeItem<T>(
   val expended: Boolean = false,
   val name: String,
   // TODO Add type for styling etc.
-  val selectable: Boolean
+  val selectable: Boolean,
+  val filterKey:  String?
 )
 
 data class TreeNode<T>(
@@ -87,7 +87,8 @@ fun <T> TreeView(
   rootItems: List<TreeItem<T>>,
   expandItem: (T) -> List<TreeItem<T>>,
   onDoubleClick: (List<TreeItem<T>>) -> Unit = {},
-  filter: String
+  filter: String,
+  drawItem: @Composable (TreeItem<T>) -> Unit
 ) {
   val scope = rememberCoroutineScope()
   var delayedClick by remember { mutableStateOf<Job?>(null) }
@@ -101,7 +102,8 @@ fun <T> TreeView(
 
   for (node in tree) {
     if (node.level == 0) {
-      keep = filter in node.item.name
+      val filterKey = node.item.filterKey
+      keep = filterKey != null && filter in filterKey
     }
     if (keep) {
       filteredTree += node
@@ -117,7 +119,7 @@ fun <T> TreeView(
 
   var selectionViaMeta by remember { mutableStateOf(false) }
 
-  TreeView(filteredTree) { filteredClickedItemIndex, itemClickEvent ->
+  TreeView(filteredTree, onItemClickEvent = { filteredClickedItemIndex, itemClickEvent ->
 
     val filteredClickedNode = filteredTree[filteredClickedItemIndex]
     val clickedItemIndex = tree.indexOfFirst { it.id == filteredClickedNode.id }
@@ -225,7 +227,7 @@ fun <T> TreeView(
         lastRowClick = clickedItemIndex to clickInstant
       }
     }
-  }
+  }, drawItem)
 }
 
 private fun <T> toggleExpandNode(
@@ -302,7 +304,8 @@ private fun <T> List<TreeNode<T>>.toggleSelected(node: TreeNode<T>) = map {
 @Composable
 fun <T> TreeView(
   tree: List<TreeNode<T>>,
-  onItemClickEvent: (Int, ItemClickEvent) -> Unit
+  onItemClickEvent: (Int, ItemClickEvent) -> Unit,
+  drawItem: @Composable (TreeItem<T>) -> Unit
 ) {
   Surface(
     modifier = Modifier.fillMaxSize()
@@ -310,8 +313,8 @@ fun <T> TreeView(
     with(AmbientDensity.current) {
       Box {
         val scrollState = rememberLazyListState()
-        val fontSize = 14.sp
-        val lineHeight = fontSize.toDp() * 1.5f
+        // icon height
+        val lineHeight = 24.dp
 
         LazyColumn(
           state = scrollState,
@@ -324,14 +327,16 @@ fun <T> TreeView(
                 enter = expandVertically(),
                 exit = shrinkVertically()
               ) {
-                TreeItemView(fontSize, lineHeight, node, index) {
-                  onItemClickEvent(index, it)
-                }
+                TreeItemView(
+                  node,
+                  index,
+                  { onItemClickEvent(index, it) },
+                  drawItem
+                )
               }
             }
           }
         }
-
         VerticalScrollbar(
           rememberScrollbarAdapter(scrollState, tree.size, lineHeight),
           Modifier.align(Alignment.CenterEnd)
@@ -348,11 +353,10 @@ enum class ItemClickEvent {
 
 @Composable
 private fun <T> TreeItemView(
-  fontSize: TextUnit,
-  height: Dp,
   node: TreeNode<T>,
   index: Int,
-  onItemClickEvent: (ItemClickEvent) -> Unit
+  onItemClickEvent: (ItemClickEvent) -> Unit,
+  drawItem: @Composable (TreeItem<T>) -> Unit
 ) {
   val defaultColor = MaterialTheme.colors.surface
   val grey = Color(red = 240, green = 240, blue = 240)
@@ -367,40 +371,17 @@ private fun <T> TreeItemView(
           },
         )
         .padding(start = 24.dp * node.level)
-        .height(height)
+        // .height(height)
         .fillMaxWidth()
     ) {
-      val active = remember { mutableStateOf(false) }
-
-      TreeItemIcon(Modifier.align(Alignment.CenterVertically), node, onItemClickEvent)
-      Text(
-        text = node.item.name,
-        color = if (active.value) AmbientContentColor.current.copy(alpha = 0.60f) else AmbientContentColor.current,
-        modifier = Modifier
-          .align(Alignment.CenterVertically)
-          .clipToBounds()
-          .pointerMoveFilter(
-            onEnter = {
-              active.value = true
-              true
-            },
-            onExit = {
-              active.value = false
-              true
-            }
-          ),
-        softWrap = true,
-        fontSize = fontSize,
-        overflow = TextOverflow.Ellipsis,
-        maxLines = 1
-      )
+      TreeItemIcon(node, onItemClickEvent)
+      drawItem(node.item)
     }
   }
 }
 
 @Composable
 private fun <T> TreeItemIcon(
-  modifier: Modifier,
   node: TreeNode<T>,
   onItemClickEvent: (ItemClickEvent) -> Unit
 ) {
@@ -410,7 +391,7 @@ private fun <T> TreeItemIcon(
     }
   } else Modifier
   Box(
-    modifier
+    Modifier
       .size(24.dp)
       .then(clickableIfExpandable)
       .padding(4.dp)

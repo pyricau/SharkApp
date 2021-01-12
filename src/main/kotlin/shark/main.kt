@@ -1,15 +1,7 @@
 package shark
 
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.ExperimentalAnimationApi
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideOutHorizontally
-import androidx.compose.desktop.AppManager
 import androidx.compose.desktop.AppWindow
 import androidx.compose.desktop.WindowEvents
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.onActive
 import androidx.compose.ui.input.key.ExperimentalKeyInput
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.unit.IntSize
@@ -17,16 +9,17 @@ import androidx.compose.ui.window.KeyStroke
 import androidx.compose.ui.window.Menu
 import androidx.compose.ui.window.MenuBar
 import androidx.compose.ui.window.MenuItem
-import androidx.compose.ui.window.Tray
 import java.awt.FileDialog
 import java.awt.Frame
 import java.awt.KeyboardFocusManager
+import java.awt.Toolkit
 import java.awt.event.KeyEvent
 import java.awt.image.BufferedImage
 import java.io.File
 import java.util.concurrent.Executors
 import javax.imageio.ImageIO
 import javax.swing.SwingUtilities.invokeLater
+import kotlin.system.exitProcess
 
 fun main() {
   // To use Apple global menu.
@@ -37,6 +30,11 @@ fun main() {
   val image = getWindowIcon()
 
   showStartWindow(image)
+
+  Thread.setDefaultUncaughtExceptionHandler { thread, exception ->
+    exception.printStackTrace()
+    exitProcess(1)
+  }
 }
 
 private fun selectHeapDumpFile(onHeapGraphWindowShown: () -> Unit = {}) {
@@ -101,9 +99,13 @@ fun showHeapGraphWindow(heapDumpFile: File, onWindowShown: () -> Unit) {
   loadingState.load()
 
   invokeLater {
+    val screenSize = Toolkit.getDefaultToolkit().screenSize
+
     lateinit var appWindow: AppWindow
     appWindow = AppWindow(
       title = "${heapDumpFile.name} - SharkApp",
+      size = IntSize((screenSize.width * 0.8f).toInt(), (screenSize.height * 0.8f).toInt()),
+      centered = true,
       events = WindowEvents(onClose = {
         loadingState.loadedGraph.value?.close()
         loadingState.ioExecutor.shutdown()
@@ -134,6 +136,7 @@ fun showHeapGraphWindow(heapDumpFile: File, onWindowShown: () -> Unit) {
       when (keyEvent.id) {
         KeyEvent.KEY_PRESSED -> {
           when (keyEvent.keyCode) {
+            KeyEvent.VK_ALT -> pressedKeys.alt = true
             KeyEvent.VK_META -> pressedKeys.meta = true
             KeyEvent.VK_CONTROL -> pressedKeys.ctrl = true
             KeyEvent.VK_SHIFT -> pressedKeys.shift = true
@@ -141,6 +144,7 @@ fun showHeapGraphWindow(heapDumpFile: File, onWindowShown: () -> Unit) {
         }
         KeyEvent.KEY_RELEASED -> {
           when (keyEvent.keyCode) {
+            KeyEvent.VK_ALT -> pressedKeys.alt = false
             KeyEvent.VK_META -> pressedKeys.meta = false
             KeyEvent.VK_CONTROL -> pressedKeys.ctrl = false
             KeyEvent.VK_SHIFT -> pressedKeys.shift = false
@@ -151,7 +155,7 @@ fun showHeapGraphWindow(heapDumpFile: File, onWindowShown: () -> Unit) {
     }
 
     appWindow.show {
-      HeapGraphWindow(loadingState, pressedKeys)
+      HeapGraphWindow(appWindow.keyboard, loadingState, pressedKeys)
     }
 
     onWindowShown()
@@ -159,59 +163,8 @@ fun showHeapGraphWindow(heapDumpFile: File, onWindowShown: () -> Unit) {
 }
 
 class PressedKeys {
-  var meta = false
+  var alt = false
   var ctrl = false
+  var meta = false
   var shift = false
-}
-
-@OptIn(ExperimentalAnimationApi::class)
-@Composable
-fun ScreenTransition(visible: Boolean, forward: Boolean, content: @Composable () -> Unit) {
-  if (visible) {
-    content()
-  }
-  // TODO Figure out how to make transitions work.
-  if (true) {
-    return
-  }
-  if (forward) {
-    AnimatedVisibility(
-      initiallyVisible = false,
-      visible = visible,
-      enter = slideInHorizontally(
-        // Offsets the content by 1/3 of its width to the left, and slide towards right
-        initialOffsetX = { fullWidth -> fullWidth },
-        // Overwrites the default animation with tween for this slide animation.
-        animSpec = tween(durationMillis = 4000)
-      ),
-      exit = slideOutHorizontally(
-        // Overwrites the ending position of the slide-out to 200 (pixels) to the right
-        targetOffsetX = { fullWidth -> -fullWidth },
-        animSpec = tween(durationMillis = 4000)
-        // animSpec = spring(stiffness = Spring.StiffnessHigh)
-      )
-    ) {
-      content()
-    }
-  } else {
-    AnimatedVisibility(
-      initiallyVisible = false,
-      visible = visible,
-      enter = slideInHorizontally(
-        // Offsets the content by 1/3 of its width to the left, and slide towards right
-        initialOffsetX = { fullWidth -> -fullWidth },
-        // Overwrites the default animation with tween for this slide animation.
-        // animSpec = tween(durationMillis = 200)
-        animSpec = tween(durationMillis = 4000)
-      ),
-      exit = slideOutHorizontally(
-        // Overwrites the ending position of the slide-out to 200 (pixels) to the right
-        targetOffsetX = { fullWidth -> fullWidth },
-        // animSpec = spring(stiffness = Spring.StiffnessHigh)
-        animSpec = tween(durationMillis = 4000)
-      )
-    ) {
-      content()
-    }
-  }
 }

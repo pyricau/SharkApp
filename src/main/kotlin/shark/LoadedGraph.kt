@@ -3,21 +3,26 @@
 package shark
 
 import shark.HeapObject.HeapClass
+import shark.HeapObject.HeapInstance
+import shark.HeapObject.HeapObjectArray
+import shark.HeapObject.HeapPrimitiveArray
 import shark.HprofHeapGraph.Companion.openHeapGraph
 import shark.internal.AndroidNativeSizeMapper
 import shark.internal.ObjectDominators.DominatorNode
 import shark.internal.PathFinder
+import shark.internal.ReferencePathNode.ChildNode
+import shark.internal.ReferencePathNode.RootNode
 import shark.internal.ShallowSizeCalculator
 import shark.internal.hppc.LongLongScatterMap
 import shark.internal.hppc.LongLongScatterMap.ForEachCallback
 import java.io.File
-import shark.internal.ReferencePathNode.ChildNode
 
 class LoadedGraph private constructor(
   private val graph: CloseableHeapGraph,
   private val classesWithInstanceCounts: Map<Long, Int>,
   private val dominatingTree: Map<Long, DominatorNode>,
   val leakingObjectIds: Set<Long>,
+  val unreachableLeakingObjectIds: Set<Long>,
   val objectInspectors: List<ObjectInspector>,
   val computeSize: (Long) -> Int,
   private val dominated: LongLongScatterMap
@@ -51,24 +56,34 @@ class LoadedGraph private constructor(
     }
   }
 
-  fun shortestPathFromGcRoots(objectId: Long): List<Long> {
+  fun shortestPathFromGcRoots(objectId: Long): ShortestPath? {
     val pathFinder = PathFinder(
       graph,
       OnAnalysisProgressListener.NO_OP, AndroidReferenceMatchers.appDefaults
     )
     val result = pathFinder.findPathsFromGcRoots(setOf(objectId), false).pathsToLeakingObjects
     if (result.isEmpty()) {
-      return emptyList()
+      return null
     }
     val leaf = result.first()
-    val path = mutableListOf<Long>()
+    val path = mutableListOf<PathNode>()
     var leakNode = leaf
     while (leakNode is ChildNode) {
-      path.add(0, leakNode.objectId)
+      path.add(
+        0,
+        PathNode(
+          leakNode.objectId,
+          NodeRef(
+            leakNode.refFromParentType,
+            leakNode.refFromParentName,
+            leakNode.owningClassId
+          )
+        )
+      )
       leakNode = leakNode.parent
     }
-    path.add(0, leakNode.objectId)
-    return path
+    val rootNode = leakNode as RootNode
+    return ShortestPath(rootNode.gcRoot, rootNode.objectId, path)
   }
 
   fun dominator(objectId: Long): Long {
@@ -105,6 +120,8 @@ class LoadedGraph private constructor(
         AndroidObjectInspectors.appLeakingObjectFilters
       )
 
+      // TODO  Use path finder instead, removing duplicates AND unreachable objects.
+      // Maybe separately track unreachable leaking objects.
       val leakingObjectIds = leakingObjectFinder.findLeakingObjectIds(graph)
 
       val objectInspectors = AndroidObjectInspectors.appDefaults
@@ -116,18 +133,15 @@ class LoadedGraph private constructor(
       val nativeSizes = nativeSizeMapper.mapNativeSizes()
       val shallowSizeCalculator = ShallowSizeCalculator(graph)
 
-      val computeSize: (Long) -> Int = { objectId ->
-        val nativeSize = nativeSizes[objectId] ?: 0
-        val shallowSize = shallowSizeCalculator.computeShallowSize(objectId)
-        nativeSize + shallowSize
-      }
-
       val pathFinder = PathFinder(
         graph,
         OnAnalysisProgressListener.NO_OP, ignoredRefs
       )
-      val result = pathFinder.findPathsFromGcRoots(setOf(), true)
+      val result = pathFinder.findPathsFromGcRoots(leakingObjectIds, true)
       val dominatorTree = result.dominatorTree!!
+      val pathsToLeakingObjects = result.pathsToLeakingObjects
+      val foundLeakingObjectIds = pathsToLeakingObjects.map { it.objectId }.toSet()
+      val unreachableLeakingObjectIds = leakingObjectIds - foundLeakingObjectIds
 
       val dominated: LongLongScatterMap =
         dominatorTree::class.java.getDeclaredField("dominated").apply { isAccessible = true }
@@ -144,15 +158,31 @@ class LoadedGraph private constructor(
       })
 
       // destructive operation
-      val dominatingTree = dominatorTree.buildFullDominatorTree(computeSize)
+      val dominatingTree = dominatorTree.buildFullDominatorTree { objectId ->
+        val nativeSize = nativeSizes[objectId] ?: 0
+        val shallowSize = shallowSizeCalculator.computeShallowSize(objectId)
+        nativeSize + shallowSize
+      }
+
+      // Note: shallowSizeCalculator inflates some shallow size to fix retained size.
+      val computeShallowSize: (Long) -> Int = { objectId ->
+        when (val heapObject = graph.findObjectById(objectId)) {
+          is HeapInstance -> heapObject.byteSize
+          is HeapObjectArray -> heapObject.readByteSize()
+          is HeapPrimitiveArray -> heapObject.readByteSize()
+          // This is probably way off but is a cheap approximation.
+          is HeapClass -> heapObject.recordSize
+        }
+      }
 
       return LoadedGraph(
         graph,
         classesWithInstanceCounts,
         dominatingTree,
-        leakingObjectIds,
+        foundLeakingObjectIds,
+        unreachableLeakingObjectIds,
         objectInspectors,
-        computeSize,
+        computeShallowSize,
         dominatedCopy
       )
     }
@@ -164,4 +194,21 @@ class Dominating(
   val retainedSize: Int,
   val retainedCount: Int,
   val dominatedObjectIds: List<Long>
+)
+
+class ShortestPath(
+  val gcRoot: GcRoot,
+  val rootHeldObjectId: Long,
+  val path: List<PathNode>
+)
+
+class PathNode(
+  val objectId: Long,
+  val ref: NodeRef
+)
+
+class NodeRef(
+  val refFromParentType: LeakTraceReference.ReferenceType,
+  val refFromParentName: String,
+  val owningClassId: Long
 )
