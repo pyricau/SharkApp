@@ -1,13 +1,13 @@
 package shark
 
-sealed class Screen {
+sealed class SharkScreen {
 
   abstract val title: String
 
-  class Home : Screen() {
+  class Home : SharkScreen() {
     override val title = "Home"
   }
 
   class HeapObjectTree(override val title: String, val initialItems: List<TreeItem<HeapItem>>) :
-    Screen()
+    SharkScreen()
 }

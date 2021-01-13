@@ -29,7 +29,7 @@ import shark.HeapObject.HeapClass
 import shark.HeapObject.HeapInstance
 import shark.HeapObject.HeapObjectArray
 import shark.HeapObject.HeapPrimitiveArray
-import shark.Screen.HeapObjectTree
+import shark.SharkScreen.HeapObjectTree
 import kotlin.math.max
 
 @Composable
@@ -37,7 +37,7 @@ fun HeapObjectTreeScreen(
   graph: LoadedGraph,
   pressedKeys: PressedKeys,
   showing: HeapObjectTree,
-  goTo: (Screen) -> Unit
+  goTo: (SharkScreen) -> Unit
 ) {
   Column {
     var filter by remember { mutableStateOf("") }

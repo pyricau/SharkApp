@@ -4,16 +4,20 @@ import androidx.compose.desktop.AppWindow
 import androidx.compose.desktop.WindowEvents
 import androidx.compose.ui.input.key.ExperimentalKeyInput
 import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.plus
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.window.KeyStroke
 import androidx.compose.ui.window.Menu
 import androidx.compose.ui.window.MenuBar
 import androidx.compose.ui.window.MenuItem
+import shark.SharkScreen.Home
 import java.awt.FileDialog
 import java.awt.Frame
 import java.awt.KeyboardFocusManager
 import java.awt.Toolkit
 import java.awt.event.KeyEvent
+import java.awt.event.KeyEvent.VK_LEFT
+import java.awt.event.KeyEvent.VK_RIGHT
 import java.awt.image.BufferedImage
 import java.io.File
 import java.util.concurrent.Executors
@@ -21,20 +25,27 @@ import javax.imageio.ImageIO
 import javax.swing.SwingUtilities.invokeLater
 import kotlin.system.exitProcess
 
-fun main() {
+fun main(args: Array<String>) {
+  Thread.setDefaultUncaughtExceptionHandler { thread, exception ->
+    exception.printStackTrace()
+    exitProcess(1)
+  }
+
   // To use Apple global menu.
   System.setProperty("apple.laf.useScreenMenuBar", "true")
   // Set application name
   System.setProperty("com.apple.mrj.application.apple.menu.about.name", "SharkApp")
 
-  val image = getWindowIcon()
-
-  showStartWindow(image)
-
-  Thread.setDefaultUncaughtExceptionHandler { thread, exception ->
-    exception.printStackTrace()
-    exitProcess(1)
+  if (args.size == 1 && args.first().endsWith(".hprof")) {
+    val heapDumpFile = File(args.first())
+    if (heapDumpFile.name.endsWith(".hprof") && heapDumpFile.exists()) {
+      showHeapGraphWindow(heapDumpFile)
+      return
+    }
   }
+
+  val image = getWindowIcon()
+  showStartWindow(image)
 }
 
 private fun selectHeapDumpFile(onHeapGraphWindowShown: () -> Unit = {}) {
@@ -94,7 +105,7 @@ fun getWindowIcon(): BufferedImage {
 }
 
 @OptIn(ExperimentalKeyInput::class)
-fun showHeapGraphWindow(heapDumpFile: File, onWindowShown: () -> Unit) {
+fun showHeapGraphWindow(heapDumpFile: File, onWindowShown: () -> Unit = {}) {
   val loadingState = HeapDumpLoadingState(heapDumpFile, Executors.newSingleThreadExecutor())
   loadingState.load()
 
@@ -109,7 +120,6 @@ fun showHeapGraphWindow(heapDumpFile: File, onWindowShown: () -> Unit) {
       events = WindowEvents(onClose = {
         loadingState.loadedGraph.value?.close()
         loadingState.ioExecutor.shutdown()
-        println("Closed ${heapDumpFile.path}")
       }),
       menuBar = MenuBar(
         Menu(
@@ -154,8 +164,17 @@ fun showHeapGraphWindow(heapDumpFile: File, onWindowShown: () -> Unit) {
       false
     }
 
+    val navigator = ScreenNavigator<SharkScreen>(
+      Home(),
+      recentsEquals = { screen1, screen2 -> screen1.title == screen2.title })
+    appWindow.keyboard.apply {
+      setShortcut(Key.AltLeft + Key(VK_LEFT), navigator::goBack)
+      setShortcut(Key.AltRight + Key(VK_LEFT), navigator::goBack)
+      setShortcut(Key.AltLeft + Key(VK_RIGHT), navigator::goForward)
+      setShortcut(Key.AltLeft + Key(VK_RIGHT), navigator::goForward)
+    }
     appWindow.show {
-      HeapGraphWindow(appWindow.keyboard, loadingState, pressedKeys)
+      HeapGraphWindow(navigator, loadingState, pressedKeys)
     }
 
     onWindowShown()

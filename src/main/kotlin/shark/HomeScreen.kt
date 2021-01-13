@@ -14,14 +14,13 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.font.FontWeight.Companion
 import androidx.compose.ui.unit.dp
-import shark.Screen.HeapObjectTree
+import shark.SharkScreen.HeapObjectTree
 
 @Composable
 fun HomeScreen(
   graph: LoadedGraph,
-  goTo: (Screen) -> Unit
+  goTo: (SharkScreen) -> Unit
 ) {
   Column {
     val root = graph.dominating(0)!!

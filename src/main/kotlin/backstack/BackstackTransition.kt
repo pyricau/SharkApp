@@ -1,11 +1,12 @@
 @file:Suppress("RemoveEmptyParenthesesFromAnnotationEntry", "DEPRECATION")
 
-package shark
+package backstack
 
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawOpacity
-import shark.BackstackTransition.Crossfade
-import shark.BackstackTransition.Slide
+import backstack.BackstackTransition.Crossfade
+import backstack.BackstackTransition.Slide
+import shark.PercentageLayoutOffset
 
 /**
  * Defines transitions for a [Backstack]. Transitions control how screens are rendered by returning

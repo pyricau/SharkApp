@@ -1,6 +1,6 @@
 @file:Suppress("RemoveEmptyParenthesesFromAnnotationEntry", "FunctionName")
 
-package shark
+package backstack
 
 import androidx.compose.animation.animatedFloat
 import androidx.compose.animation.core.AnimationEndReason
@@ -15,8 +15,9 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawOpacity
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.platform.AnimationClockAmbient
-import shark.TransitionDirection.Backward
-import shark.TransitionDirection.Forward
+import backstack.BackstackTransition.Slide
+import backstack.TransitionDirection.Backward
+import backstack.TransitionDirection.Forward
 
 /** Used to hide screens when not transitioning. */
 internal val HIDDEN_MODIFIER = Modifier.drawOpacity(0f)
@@ -128,7 +129,7 @@ private val DefaultBackstackAnimation: AnimationSpec<Float>
 fun <T : Any> Backstack(
   backstack: List<T>,
   modifier: Modifier = Modifier,
-  transition: BackstackTransition = BackstackTransition.Slide,
+  transition: BackstackTransition = Slide,
   animationBuilder: AnimationSpec<Float>? = null,
   onTransitionStarting: ((from: List<T>, to: List<T>, TransitionDirection) -> Unit)? = null,
   onTransitionFinished: (() -> Unit)? = null,
