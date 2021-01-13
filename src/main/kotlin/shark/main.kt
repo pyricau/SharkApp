@@ -11,6 +11,7 @@ import androidx.compose.ui.window.Menu
 import androidx.compose.ui.window.MenuBar
 import androidx.compose.ui.window.MenuItem
 import shark.SharkScreen.Home
+import shark.adb.showAdbDumpHeapWindow
 import java.awt.FileDialog
 import java.awt.Frame
 import java.awt.KeyboardFocusManager
@@ -36,40 +37,46 @@ fun main(args: Array<String>) {
   // Set application name
   System.setProperty("com.apple.mrj.application.apple.menu.about.name", "SharkApp")
 
+  val windowIcon = getWindowIcon()
+
   if (args.size == 1 && args.first().endsWith(".hprof")) {
     val heapDumpFile = File(args.first())
     if (heapDumpFile.name.endsWith(".hprof") && heapDumpFile.exists()) {
-      showHeapGraphWindow(heapDumpFile)
+      showHeapGraphWindow(windowIcon, heapDumpFile)
       return
     }
   }
 
-  val image = getWindowIcon()
-  showStartWindow(image)
+  // TODO These should be suspending functions
+  showStartWindow(windowIcon, onOpenHeapDump = { closeStartWindow ->
+    showSelectHeapDumpFileWindow(onHprofFileSelected = { hprofFile ->
+      showHeapGraphWindow(windowIcon, hprofFile, onWindowShown = {
+        closeStartWindow()
+      })
+    })
+  })
 }
 
-private fun selectHeapDumpFile(onHeapGraphWindowShown: () -> Unit = {}) {
+private fun showSelectHeapDumpFileWindow(onHprofFileSelected: (File) -> Unit) {
   val fileDialog = FileDialog(null as Frame?, "Select hprof file")
   fileDialog.isVisible = true
 
   if (fileDialog.file != null && fileDialog.file.endsWith(".hprof")) {
     val heapDumpFile = File(fileDialog.directory, fileDialog.file)
-    showHeapGraphWindow(heapDumpFile) {
-      onHeapGraphWindowShown()
-    }
+    onHprofFileSelected(heapDumpFile)
   }
 }
 
-private fun showStartWindow(image: BufferedImage) {
+private fun showStartWindow(windowIcon: BufferedImage, onOpenHeapDump: (() -> Unit) -> Unit) {
   invokeLater {
     lateinit var appWindow: AppWindow
     val selectHeapDumpFile = {
-      selectHeapDumpFile {
+      onOpenHeapDump {
         appWindow.close()
       }
     }
     appWindow = AppWindow(
-      title = "SharkApp", size = IntSize(300, 300), icon = image,
+      title = "SharkApp", size = IntSize(300, 300), icon = windowIcon,
       menuBar = MenuBar(
         Menu(
           name = "File",
@@ -105,7 +112,11 @@ fun getWindowIcon(): BufferedImage {
 }
 
 @OptIn(ExperimentalKeyInput::class)
-fun showHeapGraphWindow(heapDumpFile: File, onWindowShown: () -> Unit = {}) {
+fun showHeapGraphWindow(
+  windowIcon: BufferedImage,
+  heapDumpFile: File,
+  onWindowShown: () -> Unit = {}
+) {
   val loadingState = HeapDumpLoadingState(heapDumpFile, Executors.newSingleThreadExecutor())
   loadingState.load()
 
@@ -117,6 +128,7 @@ fun showHeapGraphWindow(heapDumpFile: File, onWindowShown: () -> Unit = {}) {
       title = "${heapDumpFile.name} - SharkApp",
       size = IntSize((screenSize.width * 0.8f).toInt(), (screenSize.height * 0.8f).toInt()),
       centered = true,
+      icon = windowIcon,
       events = WindowEvents(onClose = {
         loadingState.loadedGraph.value?.close()
         loadingState.ioExecutor.shutdown()
@@ -126,8 +138,17 @@ fun showHeapGraphWindow(heapDumpFile: File, onWindowShown: () -> Unit = {}) {
           name = "File",
           MenuItem(
             name = "Open Heap Dump",
-            onClick = ::selectHeapDumpFile,
+            onClick = {
+              showSelectHeapDumpFileWindow(onHprofFileSelected = { selectedFile ->
+                showHeapGraphWindow(windowIcon, selectedFile)
+              })
+            },
             shortcut = KeyStroke(Key.O)
+          ),
+          MenuItem(
+            name = "Dump Heap with adb",
+            onClick = { showAdbDumpHeapWindow(windowIcon) },
+            shortcut = KeyStroke(Key.D)
           ),
           MenuItem(
             name = "Close Heap Dump",
