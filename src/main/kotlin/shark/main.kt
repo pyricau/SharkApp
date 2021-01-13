@@ -21,7 +21,7 @@ import javax.imageio.ImageIO
 import javax.swing.SwingUtilities.invokeLater
 import kotlin.system.exitProcess
 
-fun main() {
+fun main(args: Array<String>) {
   // To use Apple global menu.
   System.setProperty("apple.laf.useScreenMenuBar", "true")
   // Set application name
@@ -29,9 +29,23 @@ fun main() {
 
   val image = getWindowIcon()
 
-  showStartWindow(image)
+    val fileToOpen = args.getOrNull(0)?.let { filePath ->
+        try {
+            File(filePath)
+        } catch (exception: Exception) {
+            println("Could not open file $filePath")
+            null
+        }
+    }
 
-  Thread.setDefaultUncaughtExceptionHandler { thread, exception ->
+    if (fileToOpen == null) {
+        showStartWindow(image)
+    } else {
+        showHeapGraphWindow(fileToOpen)
+    }
+
+
+    Thread.setDefaultUncaughtExceptionHandler { thread, exception ->
     exception.printStackTrace()
     exitProcess(1)
   }
@@ -94,7 +108,7 @@ fun getWindowIcon(): BufferedImage {
 }
 
 @OptIn(ExperimentalKeyInput::class)
-fun showHeapGraphWindow(heapDumpFile: File, onWindowShown: () -> Unit) {
+fun showHeapGraphWindow(heapDumpFile: File, onWindowShown: (() -> Unit)? = null) {
   val loadingState = HeapDumpLoadingState(heapDumpFile, Executors.newSingleThreadExecutor())
   loadingState.load()
 
@@ -158,7 +172,7 @@ fun showHeapGraphWindow(heapDumpFile: File, onWindowShown: () -> Unit) {
       HeapGraphWindow(appWindow.keyboard, loadingState, pressedKeys)
     }
 
-    onWindowShown()
+    onWindowShown?.invoke()
   }
 }
 
