@@ -2,6 +2,7 @@
 
 package shark
 
+import kotlinx.coroutines.suspendCancellableCoroutine
 import shark.HeapObject.HeapClass
 import shark.HeapObject.HeapInstance
 import shark.HeapObject.HeapObjectArray
@@ -102,7 +103,6 @@ class LoadedGraph private constructor(
           val realSource = fileSourceProvider.openRandomAccessSource()
           return object : RandomAccessSource by realSource {
             override fun read(sink: okio.Buffer, position: Long, byteCount: Long): Long {
-              // println("IO from thread ${Thread.currentThread().name}")
               return realSource.read(sink, position, byteCount)
             }
           }

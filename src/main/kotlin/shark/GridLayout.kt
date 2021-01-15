@@ -22,8 +22,7 @@ fun GridLayout(
 ) {
   Layout(
     modifier = modifier.verticalScroll(
-      state = scrollState,
-      enabled = true
+      state = scrollState
     ),
     content = content
   ) { measurables, constraints ->

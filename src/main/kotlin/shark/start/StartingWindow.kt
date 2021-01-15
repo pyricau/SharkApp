@@ -1,4 +1,4 @@
-package shark
+package shark.start
 
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
@@ -11,7 +11,6 @@ import androidx.compose.material.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
-import androidx.compose.ui.Alignment.Companion
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.imageResource
 import androidx.compose.ui.unit.dp
@@ -19,10 +18,10 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 @Composable
-fun StartingWindow(onSelectFileClick: () -> Unit) {
+fun StartingWindow(onSelectFileClick: () -> Unit,  onDumpHeapClicked:  ()->Unit) {
   val scope = rememberCoroutineScope()
   MaterialTheme {
-    Column(Modifier.fillMaxSize(), Arrangement.spacedBy(25.dp)) {
+    Column(Modifier.fillMaxSize(), Arrangement.spacedBy(24.dp)) {
       Image(
         bitmap = imageResource("shark.png"),
         modifier = Modifier.fillMaxWidth()
@@ -35,6 +34,9 @@ fun StartingWindow(onSelectFileClick: () -> Unit) {
         }
       }) {
         Text("Open Heap Dump")
+      }
+      Button(modifier = Modifier.align(Alignment.CenterHorizontally), onClick = onDumpHeapClicked) {
+        Text("Dump Heap with adb")
       }
     }
   }
